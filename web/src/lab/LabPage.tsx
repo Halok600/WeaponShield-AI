@@ -24,6 +24,7 @@ function describeAdapter(info: AdapterInfo | null, threads: number): string {
 export function LabPage() {
   const [status, setStatus] = useState<Status>('loading');
   const [backend, setBackend] = useState<Backend | null>(null);
+  const [detectionsJson, setDetectionsJson] = useState('');
   const [adapter, setAdapter] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +45,7 @@ export function LabPage() {
       if (!stale) setProgress(total > 0 ? loaded / total : 0);
     };
     client
-      .init(ACTIVE_MODEL)
+      .init(ACTIVE_MODEL, new URLSearchParams(location.search).get('webgpu') !== '0') // ?webgpu=0 forces the WASM backend
       .then((info) => {
         if (stale) return;
         setBackend(info.backend);
@@ -120,6 +121,7 @@ export function LabPage() {
     if (!client || !canvas) return;
     setLive(false);
     setError(null);
+    setDetectionsJson('');
     let shown: ImageBitmap | null = null;
     try {
       shown = await createImageBitmap(file);
@@ -141,6 +143,7 @@ export function LabPage() {
       paint(ctx, buildDetectionPrimitives(dets), 1, 1);
       setCount(counts(dets));
       setInferMs(r.inferMs);
+      setDetectionsJson(JSON.stringify(dets.map((d) => ({ cls: d.cls, conf: d.conf, box: [d.box.x1, d.box.y1, d.box.x2, d.box.y2] }))));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -186,6 +189,8 @@ export function LabPage() {
           {live ? 'Stop webcam' : 'Start webcam'}
         </button>
       </div>
+      {/* Machine-readable image detections (source pixels) for the parity e2e. */}
+      <pre data-testid="detections-json" hidden>{detectionsJson}</pre>
       <video ref={videoRef} muted playsInline className="hidden" />
       <canvas ref={canvasRef} className="w-full rounded border border-slate-700" />
     </main>
