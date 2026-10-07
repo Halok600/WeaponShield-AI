@@ -28,9 +28,15 @@ export function startLiveLoop(o: LiveLoopOptions): () => void {
       inFlight = true;
       const t = o.clock();
       createImageBitmap(o.video)
-        .then((bitmap) => o.client.detect(bitmap, o.lowConf()))
+        .then((bitmap) => {
+          if (stopped) {
+            bitmap.close();
+            return undefined;
+          }
+          return o.client.detect(bitmap, o.lowConf());
+        })
         .then((r) => {
-          if (!stopped) o.onResult(r, t);
+          if (r && !stopped) o.onResult(r, t);
         })
         .catch((e) => {
           if (!(e instanceof BusyError) && !stopped) o.onError(e);

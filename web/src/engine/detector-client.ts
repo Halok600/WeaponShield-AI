@@ -4,6 +4,7 @@ import type { DetectResult, FromWorker, ReadyInfo, ToWorker } from './protocol';
 export interface WorkerLike {
   postMessage(message: ToWorker, transfer: Transferable[]): void;
   onmessage: ((ev: MessageEvent<FromWorker>) => void) | null;
+  onerror: ((ev: ErrorEvent) => void) | null;
   terminate(): void;
 }
 
@@ -23,6 +24,14 @@ export function createDetectorWorker(): Worker {
   return new Worker(new URL('./detector.worker.ts', import.meta.url), { type: 'module' });
 }
 
+function closeQuietly(bitmap: ImageBitmap): void {
+  try {
+    bitmap.close();
+  } catch {
+    // already closed or transferred
+  }
+}
+
 /** Main-thread handle on the detector worker. At most one frame is in flight; extra frames are refused. */
 export class DetectorClient {
   onProgress: ((loaded: number, total: number) => void) | null = null;
@@ -30,10 +39,12 @@ export class DetectorClient {
   private nextId = 1;
   private inFlight: { id: number; pending: Pending<DetectResult> } | null = null;
   private initPending: Pending<ReadyInfo> | null = null;
+  private disposed = false;
 
   constructor(worker: WorkerLike) {
     this.worker = worker;
     worker.onmessage = (ev) => this.handle(ev.data);
+    worker.onerror = (ev) => this.failAll(new Error(`Detector worker failed: ${ev.message || 'unknown error'}`));
   }
 
   get busy(): boolean {
@@ -41,31 +52,53 @@ export class DetectorClient {
   }
 
   init(model: ModelConfig, preferWebGPU = true): Promise<ReadyInfo> {
+    if (this.disposed) return Promise.reject(new Error('Detector disposed'));
     return new Promise<ReadyInfo>((resolve, reject) => {
       this.initPending = { resolve, reject };
-      this.worker.postMessage({ type: 'init', model, preferWebGPU }, []);
+      try {
+        this.worker.postMessage({ type: 'init', model, preferWebGPU }, []);
+      } catch (err) {
+        this.initPending = null;
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 
   detect(bitmap: ImageBitmap, lowConf: number): Promise<DetectResult> {
+    if (this.disposed) {
+      closeQuietly(bitmap);
+      return Promise.reject(new Error('Detector disposed'));
+    }
     if (this.inFlight) {
-      bitmap.close();
+      closeQuietly(bitmap);
       return Promise.reject(new BusyError());
     }
     const id = this.nextId++;
     return new Promise<DetectResult>((resolve, reject) => {
       this.inFlight = { id, pending: { resolve, reject } };
-      this.worker.postMessage({ type: 'detect', id, bitmap, lowConf }, [bitmap]);
+      try {
+        this.worker.postMessage({ type: 'detect', id, bitmap, lowConf }, [bitmap]);
+      } catch (err) {
+        this.inFlight = null;
+        closeQuietly(bitmap);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 
   dispose(): void {
+    this.disposed = true;
     this.worker.terminate();
-    const err = new Error('Detector disposed');
-    this.inFlight?.pending.reject(err);
-    this.initPending?.reject(err);
+    this.failAll(new Error('Detector disposed'));
+  }
+
+  private failAll(err: Error): void {
+    const frame = this.inFlight;
+    const init = this.initPending;
     this.inFlight = null;
     this.initPending = null;
+    frame?.pending.reject(err);
+    init?.reject(err);
   }
 
   private handle(msg: FromWorker): void {

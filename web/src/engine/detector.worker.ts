@@ -41,28 +41,49 @@ async function download(url: string): Promise<Uint8Array> {
   return bytes;
 }
 
-async function createSession(bytes: Uint8Array, preferWebGPU: boolean): Promise<{ s: ort.InferenceSession; backend: Backend }> {
+async function warmUp(s: ort.InferenceSession, data: Float32Array, size: number): Promise<void> {
+  // Compiles WebGPU shaders / allocates WASM memory before the first real frame.
+  await s.run({ [s.inputNames[0]!]: new ort.Tensor('float32', data, [1, 3, size, size]) });
+}
+
+async function createSession(
+  bytes: Uint8Array,
+  preferWebGPU: boolean,
+  data: Float32Array,
+  size: number,
+): Promise<{ s: ort.InferenceSession; backend: Backend }> {
   if (preferWebGPU && 'gpu' in navigator) {
+    let gpuSession: ort.InferenceSession | null = null;
     try {
       const adapter = await navigator.gpu.requestAdapter();
-      if (adapter) return { s: await ort.InferenceSession.create(bytes, { executionProviders: ['webgpu'] }), backend: 'webgpu' };
+      if (adapter) {
+        gpuSession = await ort.InferenceSession.create(bytes, { executionProviders: ['webgpu'] });
+        await warmUp(gpuSession, data, size);
+        return { s: gpuSession, backend: 'webgpu' };
+      }
     } catch (err) {
       console.warn('WebGPU session failed, falling back to WASM', err);
+      try {
+        await gpuSession?.release();
+      } catch {
+        // ignore release errors
+      }
     }
   }
-  return { s: await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] }), backend: 'wasm' };
+  const s = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] });
+  await warmUp(s, data, size);
+  return { s, backend: 'wasm' };
 }
 
 async function init(m: ModelConfig, preferWebGPU: boolean): Promise<void> {
   const t0 = performance.now();
   const bytes = await download(m.url);
-  const { s, backend } = await createSession(bytes, preferWebGPU);
   const size = m.inputSize;
-  tensorData = new Float32Array(3 * size * size);
-  // Warm-up run: compiles WebGPU shaders / allocates WASM memory before the first real frame.
-  await s.run({ [s.inputNames[0]!]: new ort.Tensor('float32', tensorData, [1, 3, size, size]) });
+  const data = new Float32Array(3 * size * size);
+  const { s, backend } = await createSession(bytes, preferWebGPU, data, size);
   ctx = new OffscreenCanvas(size, size).getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('OffscreenCanvas 2D context unavailable');
+  tensorData = data;
   session = s;
   model = m;
   post({ type: 'ready', backend, loadMs: Math.round(performance.now() - t0) });
@@ -77,10 +98,13 @@ async function detect(id: number, bitmap: ImageBitmap, lowConf: number): Promise
   const size = model.inputSize;
   const { width, height } = bitmap;
   const lb = letterboxGeometry(width, height, size);
-  ctx.fillStyle = 'rgb(114,114,114)';
-  ctx.fillRect(0, 0, size, size);
-  ctx.drawImage(bitmap, lb.padX, lb.padY, lb.newW, lb.newH);
-  bitmap.close();
+  try {
+    ctx.fillStyle = 'rgb(114,114,114)';
+    ctx.fillRect(0, 0, size, size);
+    ctx.drawImage(bitmap, lb.padX, lb.padY, lb.newW, lb.newH);
+  } finally {
+    bitmap.close();
+  }
   rgbaToTensor(ctx.getImageData(0, 0, size, size).data, size, tensorData);
 
   const out = await session.run({ [session.inputNames[0]!]: new ort.Tensor('float32', tensorData, [1, 3, size, size]) });

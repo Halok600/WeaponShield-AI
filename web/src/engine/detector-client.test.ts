@@ -6,8 +6,11 @@ import type { FromWorker, ToWorker } from './protocol';
 class FakeWorker implements WorkerLike {
   sent: ToWorker[] = [];
   onmessage: ((ev: MessageEvent<FromWorker>) => void) | null = null;
+  onerror: ((ev: ErrorEvent) => void) | null = null;
   terminated = false;
+  throwOnPost: Error | null = null;
   postMessage(message: ToWorker): void {
+    if (this.throwOnPost) throw this.throwOnPost;
     this.sent.push(message);
   }
   terminate(): void {
@@ -15,6 +18,9 @@ class FakeWorker implements WorkerLike {
   }
   reply(msg: FromWorker): void {
     this.onmessage?.({ data: msg } as MessageEvent<FromWorker>);
+  }
+  crash(message: string): void {
+    this.onerror?.({ message } as ErrorEvent);
   }
 }
 
@@ -77,9 +83,56 @@ describe('DetectorClient', () => {
   it('dispose terminates the worker and rejects pending work', async () => {
     const w = new FakeWorker();
     const c = new DetectorClient(w);
+    const ready = c.init(STOCK_COCO_MODEL);
     const p = c.detect(fakeBitmap(), 0.1);
     c.dispose();
     await expect(p).rejects.toThrow(/disposed/);
+    await expect(ready).rejects.toThrow(/disposed/);
     expect(w.terminated).toBe(true);
+    expect(c.busy).toBe(false);
+  });
+
+  it('after dispose, detect closes the bitmap and init rejects, posting nothing', async () => {
+    const w = new FakeWorker();
+    const c = new DetectorClient(w);
+    c.dispose();
+    const b = fakeBitmap();
+    await expect(c.detect(b, 0.1)).rejects.toThrow('Detector disposed');
+    expect(b.closed).toBe(true);
+    await expect(c.init(STOCK_COCO_MODEL)).rejects.toThrow('Detector disposed');
+    expect(w.sent).toHaveLength(0);
+  });
+
+  it('does not stay busy when postMessage throws, and accepts the next frame', async () => {
+    const w = new FakeWorker();
+    const c = new DetectorClient(w);
+    w.throwOnPost = new Error('DataCloneError');
+    const b = fakeBitmap();
+    await expect(c.detect(b, 0.1)).rejects.toThrow('DataCloneError');
+    expect(c.busy).toBe(false);
+    expect(b.closed).toBe(true);
+    w.throwOnPost = null;
+    const next = c.detect(fakeBitmap(), 0.1);
+    expect(c.busy).toBe(true);
+    const sent = w.sent[0] as Extract<ToWorker, { type: 'detect' }>;
+    w.reply({ type: 'result', id: sent.id, detections: [], inferMs: 1, width: 1, height: 1 });
+    await expect(next).resolves.toBeDefined();
+  });
+
+  it('rejects init when the worker crashes during load', async () => {
+    const w = new FakeWorker();
+    const c = new DetectorClient(w);
+    const ready = c.init(STOCK_COCO_MODEL);
+    w.crash('Failed to fetch worker script');
+    await expect(ready).rejects.toThrow('Detector worker failed: Failed to fetch worker script');
+  });
+
+  it('rejects the in-flight frame and clears busy when the worker crashes', async () => {
+    const w = new FakeWorker();
+    const c = new DetectorClient(w);
+    const p = c.detect(fakeBitmap(), 0.1);
+    w.crash('');
+    await expect(p).rejects.toThrow('Detector worker failed: unknown error');
+    expect(c.busy).toBe(false);
   });
 });
