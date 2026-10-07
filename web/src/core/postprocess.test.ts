@@ -33,6 +33,22 @@ describe('decodeEndToEnd', () => {
     expect(dets.map((d) => d.cls)).toEqual(['person']);
   });
 
+  it('fails closed on a NaN confidence', () => {
+    const data = rows([100, 190, 300, 290, NaN, 0]);
+    expect(decodeEndToEnd(data, [1, 300, 6], labels, uniformThresholds(0.25), lb, 1280, 720)).toEqual([]);
+  });
+
+  it('fails closed on a NaN coordinate', () => {
+    const data = rows([NaN, 190, 300, 290, 0.9, 0], [100, 190, 300, NaN, 0.9, 0]);
+    expect(decodeEndToEnd(data, [1, 300, 6], labels, uniformThresholds(0.25), lb, 1280, 720)).toEqual([]);
+  });
+
+  it('throws a clear error when the data buffer is shorter than the declared shape', () => {
+    expect(() => decodeEndToEnd(new Float32Array(10 * 6), [1, 300, 6], labels, uniformThresholds(0.25), lb, 1280, 720)).toThrow(
+      /shorter than.*\[1,300,6\]/,
+    );
+  });
+
   it('drops boxes that collapse to under a pixel after clamping', () => {
     const data = rows([0, 0, 640, 100, 0.9, 0]); // entirely inside the top padding
     expect(decodeEndToEnd(data, [1, 300, 6], labels, uniformThresholds(0.25), lb, 1280, 720)).toEqual([]);

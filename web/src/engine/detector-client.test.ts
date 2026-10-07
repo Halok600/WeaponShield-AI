@@ -43,8 +43,8 @@ describe('DetectorClient', () => {
     const ready = c.init(STOCK_COCO_MODEL);
     expect(w.sent[0]).toEqual({ type: 'init', model: STOCK_COCO_MODEL, preferWebGPU: true });
     w.reply({ type: 'progress', loaded: 10, total: 100 });
-    w.reply({ type: 'ready', backend: 'wasm', loadMs: 42 });
-    await expect(ready).resolves.toEqual({ backend: 'wasm', loadMs: 42 });
+    w.reply({ type: 'ready', backend: 'wasm', loadMs: 42, adapterInfo: null, threads: 4 });
+    await expect(ready).resolves.toEqual({ backend: 'wasm', loadMs: 42, adapterInfo: null, threads: 4 });
     expect(progress).toEqual([10]);
   });
 

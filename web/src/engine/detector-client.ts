@@ -107,7 +107,7 @@ export class DetectorClient {
         this.onProgress?.(msg.loaded, msg.total);
         return;
       case 'ready':
-        this.initPending?.resolve({ backend: msg.backend, loadMs: msg.loadMs });
+        this.initPending?.resolve({ backend: msg.backend, loadMs: msg.loadMs, adapterInfo: msg.adapterInfo, threads: msg.threads });
         this.initPending = null;
         return;
       case 'result': {

@@ -20,14 +20,17 @@ export function decodeEndToEnd(
     throw new Error(`Unexpected model output shape [${dims.join(',')}], expected [1,N,6]`);
   }
   const n = dims[1]!;
+  if (data.length < n * 6) {
+    throw new Error(`Model output has ${data.length} values, shorter than the ${n * 6} implied by shape [${dims.join(',')}]`);
+  }
   const dets: Detection[] = [];
   for (let i = 0; i < n; i++) {
     const o = i * 6;
     const conf = data[o + 4]!;
     const cls = labels[Math.round(data[o + 5]!)];
-    if (cls === undefined || conf < thresholds[cls]) continue;
+    if (cls === undefined || !(conf >= thresholds[cls])) continue; // negated so NaN is rejected
     const box = unletterbox({ x1: data[o]!, y1: data[o + 1]!, x2: data[o + 2]!, y2: data[o + 3]! }, lb, srcW, srcH);
-    if (box.x2 - box.x1 < 1 || box.y2 - box.y1 < 1) continue;
+    if (!(box.x2 - box.x1 >= 1 && box.y2 - box.y1 >= 1)) continue; // negated so NaN is rejected
     dets.push({ cls, conf, box });
   }
   return dets.sort((a, b) => b.conf - a.conf);

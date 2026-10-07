@@ -3,7 +3,7 @@ import type { ModelConfig } from '../config/models';
 import { letterboxGeometry } from '../core/geometry';
 import { decodeEndToEnd, uniformThresholds } from '../core/postprocess';
 import { rgbaToTensor } from '../core/preprocess';
-import type { Backend, FromWorker, ToWorker } from './protocol';
+import type { AdapterInfo, Backend, FromWorker, ToWorker } from './protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -46,20 +46,25 @@ async function warmUp(s: ort.InferenceSession, data: Float32Array, size: number)
   await s.run({ [s.inputNames[0]!]: new ort.Tensor('float32', data, [1, 3, size, size]) });
 }
 
-async function createSession(
-  bytes: Uint8Array,
-  preferWebGPU: boolean,
-  data: Float32Array,
-  size: number,
-): Promise<{ s: ort.InferenceSession; backend: Backend }> {
+interface CreatedSession {
+  s: ort.InferenceSession;
+  backend: Backend;
+  adapterInfo: AdapterInfo | null;
+}
+
+async function createSession(bytes: Uint8Array, preferWebGPU: boolean, data: Float32Array, size: number): Promise<CreatedSession> {
   if (preferWebGPU && 'gpu' in navigator) {
     let gpuSession: ort.InferenceSession | null = null;
     try {
-      const adapter = await navigator.gpu.requestAdapter();
+      // Ask for the discrete GPU on hybrid-graphics laptops (Chrome otherwise tends to pick the integrated one).
+      const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
       if (adapter) {
+        // Deprecated in ORT 1.30 but the only way to hand ORT a specific adapter; it must be set before the first session.
+        ort.env.webgpu.adapter = adapter;
         gpuSession = await ort.InferenceSession.create(bytes, { executionProviders: ['webgpu'] });
         await warmUp(gpuSession, data, size);
-        return { s: gpuSession, backend: 'webgpu' };
+        const { vendor, architecture, description } = adapter.info ?? {};
+        return { s: gpuSession, backend: 'webgpu', adapterInfo: { vendor: vendor ?? '', architecture: architecture ?? '', description: description ?? '' } };
       }
     } catch (err) {
       console.warn('WebGPU session failed, falling back to WASM', err);
@@ -72,7 +77,7 @@ async function createSession(
   }
   const s = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] });
   await warmUp(s, data, size);
-  return { s, backend: 'wasm' };
+  return { s, backend: 'wasm', adapterInfo: null };
 }
 
 async function init(m: ModelConfig, preferWebGPU: boolean): Promise<void> {
@@ -80,13 +85,13 @@ async function init(m: ModelConfig, preferWebGPU: boolean): Promise<void> {
   const bytes = await download(m.url);
   const size = m.inputSize;
   const data = new Float32Array(3 * size * size);
-  const { s, backend } = await createSession(bytes, preferWebGPU, data, size);
+  const { s, backend, adapterInfo } = await createSession(bytes, preferWebGPU, data, size);
   ctx = new OffscreenCanvas(size, size).getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('OffscreenCanvas 2D context unavailable');
   tensorData = data;
   session = s;
   model = m;
-  post({ type: 'ready', backend, loadMs: Math.round(performance.now() - t0) });
+  post({ type: 'ready', backend, loadMs: Math.round(performance.now() - t0), adapterInfo, threads: ort.env.wasm.numThreads ?? 1 });
 }
 
 async function detect(id: number, bitmap: ImageBitmap, lowConf: number): Promise<void> {
@@ -117,6 +122,16 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 scope.onmessage = (ev: MessageEvent<ToWorker>) => {
   const m = ev.data;
-  if (m.type === 'init') init(m.model, m.preferWebGPU).catch((e) => post({ type: 'error', message: message(e) }));
-  else detect(m.id, m.bitmap, m.lowConf).catch((e) => post({ type: 'error', id: m.id, message: message(e) }));
+  switch (m.type) {
+    case 'init':
+      init(m.model, m.preferWebGPU).catch((e) => post({ type: 'error', message: message(e) }));
+      return;
+    case 'detect':
+      detect(m.id, m.bitmap, m.lowConf).catch((e) => post({ type: 'error', id: m.id, message: message(e) }));
+      return;
+    default: {
+      const unhandled: never = m;
+      console.error('Detector worker: unknown message', unhandled);
+    }
+  }
 };

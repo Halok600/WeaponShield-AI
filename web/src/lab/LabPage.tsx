@@ -5,7 +5,7 @@ import { filterForImage, PRESETS } from '../core/presets';
 import { type Detection, isWeapon } from '../core/types';
 import { BusyError, createDetectorWorker, DetectorClient } from '../engine/detector-client';
 import { startLiveLoop } from '../engine/live-loop';
-import type { Backend, DetectResult } from '../engine/protocol';
+import type { AdapterInfo, Backend, DetectResult } from '../engine/protocol';
 import { buildDetectionPrimitives, buildTrackPrimitives, paint } from '../render/overlay';
 
 type Status = 'loading' | 'ready' | 'error';
@@ -15,10 +15,16 @@ function counts(dets: readonly { cls: Detection['cls'] }[]) {
   return { person: dets.filter((d) => d.cls === 'person').length, weapon: dets.filter((d) => isWeapon(d.cls)).length };
 }
 
+function describeAdapter(info: AdapterInfo | null, threads: number): string {
+  const gpu = info ? [info.vendor, info.architecture, info.description].filter(Boolean).join(' ') || 'unknown GPU' : 'none';
+  return `${gpu} \u00b7 ${threads} thread${threads === 1 ? '' : 's'}`;
+}
+
 /** Temporary development harness for the detection core. Replaced by the real console in Plan 3. */
 export function LabPage() {
   const [status, setStatus] = useState<Status>('loading');
   const [backend, setBackend] = useState<Backend | null>(null);
+  const [adapter, setAdapter] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [count, setCount] = useState({ person: 0, weapon: 0 });
@@ -42,6 +48,7 @@ export function LabPage() {
       .then((info) => {
         if (stale) return;
         setBackend(info.backend);
+        setAdapter(describeAdapter(info.adapterInfo, info.threads));
         setStatus('ready');
       })
       .catch((e: Error) => {
@@ -147,6 +154,7 @@ export function LabPage() {
       <dl className="grid grid-cols-2 gap-2 sm:grid-cols-6">
         <div>status: <span data-testid="status">{status}</span></div>
         <div>backend: <span data-testid="backend">{backend ?? '…'}</span></div>
+        <div>adapter: <span data-testid="adapter">{adapter ?? '\u2026'}</span></div>
         <div>download: {Math.round(progress * 100)}%</div>
         <div>person: <span data-testid="count-person">{count.person}</span></div>
         <div>weapon: <span data-testid="count-weapon">{count.weapon}</span></div>
