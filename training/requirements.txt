@@ -1,0 +1,7 @@
+-r requirements-export.txt
+albumentations==2.0.8
+datasets==5.1.0
+fiftyone==1.22.1
+imagehash==4.3.2
+pillow>=10
+pyyaml>=6
