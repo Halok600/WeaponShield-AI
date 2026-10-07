@@ -1,0 +1,3 @@
+fixtures/golden/*.rgba binary
+fixtures/golden/*.f32 binary
+fixtures/golden/images/*.jpg binary
