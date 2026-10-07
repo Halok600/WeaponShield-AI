@@ -12,12 +12,13 @@ from weaponshield_ml.sample import Sample
 
 
 class FakeLabeler:
-    def __init__(self):
+    def __init__(self, path_sizes=None):
         self.calls = 0
+        self.path_sizes = path_sizes or {}
 
     def __call__(self, paths):
         self.calls += 1
-        return [[Box(PERSON, 1, 1, 20, 40)] for _ in paths]
+        return [([Box(PERSON, 1, 1, 20, 40)], self.path_sizes.get(p, (48, 64))) for p in paths]
 
 
 def make_samples(tmp_path, n, source, weapon_cls):
@@ -51,6 +52,7 @@ def test_layout_and_yaml(dataset):
     cfg = yaml.safe_load((out / "data.yaml").read_text())
     assert cfg["names"] == {0: "person", 1: "pistol", 2: "rifle", 3: "knife"}
     assert (cfg["train"], cfg["val"], cfg["test"]) == ("images/train", "images/val", "images/test")
+    assert "path" not in cfg
     for split in ("train", "val", "test"):
         images = sorted(p.stem for p in (out / "images" / split).iterdir())
         labels = sorted(p.stem for p in (out / "labels" / split).iterdir())
@@ -72,7 +74,12 @@ def test_stats_and_duplicates(dataset):
     out, stats, _ = dataset
     assert stats == json.loads((out / "stats.json").read_text())
     assert sum(v["images"] for v in stats["splits"].values()) == 80  # 81 samples minus 1 exact duplicate
-    assert stats["dropped"] == {"hf_ambiguous_label": 3, "exact_duplicates": 1}
+    assert stats["dropped"] == {
+        "hf_ambiguous_label": 3,
+        "exact_duplicates": 1,
+        "size_mismatch": 0,
+        "hardneg_overlaps_train": 0,
+    }
     assert stats["sources"] == {"hf-weapons": 40, "oi-weapons": 20, "oi-negatives": 20}
     assert stats["hardneg_images"] == 5
     total_knives = sum(v["instances"]["knife"] for v in stats["splits"].values())
@@ -92,3 +99,123 @@ def test_refuses_to_overwrite(tmp_path):
     (tmp_path / "ds" / "x").write_text("x")
     with pytest.raises(FileExistsError):
         build(tmp_path / "ds", [[]], [], FakeLabeler())
+
+
+def test_hardneg_leakage(tmp_path):
+    """Hard negatives that duplicate training images are excluded."""
+    src = tmp_path / "src"
+    src.mkdir()
+    weapons = make_samples(src, 10, "hf-weapons", PISTOL)
+    # A hard negative that reuses the same image file as a training sample
+    hardneg = [Sample(key="hn-dup", source="oi-neg", image_path=weapons[0].image_path, width=64, height=48)]
+    out = tmp_path / "ds"
+    labeler = FakeLabeler()
+
+    # Suppress stdout
+    import sys
+    from io import StringIO
+
+    old_stdout = sys.stdout
+    sys.stdout = StringIO()
+    try:
+        stats = build(out, [weapons], hardneg, labeler, dropped={})
+    finally:
+        sys.stdout = old_stdout
+
+    # The duplicate hard negative should be excluded
+    assert len(list((out / "hardneg" / "images").iterdir())) == 0
+    assert stats["dropped"]["hardneg_overlaps_train"] == 1
+    assert stats["hardneg_images"] == 0
+
+
+def test_duplicate_key_guard(tmp_path):
+    """Duplicate keys across splits and hardneg raise ValueError."""
+    src = tmp_path / "src"
+    src.mkdir()
+    samples = make_samples(src, 3, "hf-weapons", PISTOL)
+    # Create a hard negative with a key that might collide (though unlikely with make_samples)
+    # Instead, we'll use the build.py write_dataset directly to test
+    from weaponshield_ml.writer import write_dataset
+
+    out = tmp_path / "ds"
+    splits = {"train": samples[:2], "val": samples[2:]}
+    hardneg = [Sample(key=samples[0].key, source="oi-neg", image_path=samples[0].image_path, width=64, height=48)]
+    with pytest.raises(ValueError, match="duplicate sample key"):
+        write_dataset(out, splits, hardneg, {})
+
+
+def test_size_mismatch_filtering(tmp_path):
+    """Samples with mismatched image sizes are excluded and counted."""
+    src = tmp_path / "src"
+    src.mkdir()
+    samples = make_samples(src, 5, "hf-weapons", PISTOL)
+
+    # FakeLabeler that reports wrong height for one sample
+    path_sizes = {s.image_path: (48, 64) for s in samples}
+    path_sizes[samples[0].image_path] = (100, 100)  # Wrong size for first sample
+    labeler = FakeLabeler(path_sizes=path_sizes)
+
+    hardneg = make_samples(src, 2, "oi-neg", None)
+    out = tmp_path / "ds"
+
+    # Suppress stdout during build
+    import sys
+    from io import StringIO
+
+    old_stdout = sys.stdout
+    sys.stdout = StringIO()
+    try:
+        stats = build(out, [samples], hardneg, labeler, dropped={})
+    finally:
+        sys.stdout = old_stdout
+
+    # The first sample should be excluded due to size mismatch
+    assert sum(v["images"] for v in stats["splits"].values()) == 4  # 5 - 1 mismatch
+    assert stats["dropped"]["size_mismatch"] == 1
+
+
+def test_degenerate_box_filtering(tmp_path):
+    """Boxes that become < 1 px after clipping are filtered from stats and written labels."""
+    src = tmp_path / "src"
+    src.mkdir()
+    p = src / "img.png"
+    Image.fromarray(np.ones((48, 64, 3), dtype=np.uint8)).save(p)
+
+    # Sample with a degenerate weapon box (clipped to < 1 px width)
+    samples = [
+        Sample(
+            key="degenerative",
+            source="test",
+            image_path=p,
+            width=64,
+            height=48,
+            boxes=[
+                Box(PISTOL, 0, 0, 0.5, 10),  # < 1 px width after clipping
+                Box(PERSON, 10, 10, 30, 30),  # valid
+            ],
+        )
+    ]
+
+    labeler = FakeLabeler()
+    hardneg = []
+    out = tmp_path / "ds"
+
+    # Suppress stdout
+    import sys
+    from io import StringIO
+
+    old_stdout = sys.stdout
+    sys.stdout = StringIO()
+    try:
+        stats = build(out, [samples], hardneg, labeler, dropped={})
+    finally:
+        sys.stdout = old_stdout
+
+    # The sample should be counted as without_weapon because the degenerate box is filtered
+    assert stats["splits"]["train"]["images"] == 1
+    assert stats["splits"]["train"]["with_weapon"] == 0
+    assert stats["splits"]["train"]["without_weapon"] == 1
+    # Verify the written label file only has the PERSON box
+    labels = read_labels(out / "labels" / "train" / "degenerative.txt", 64, 48)
+    assert len(labels) == 1
+    assert labels[0].cls == PERSON

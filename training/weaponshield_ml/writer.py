@@ -11,7 +11,7 @@ from pathlib import Path
 import yaml
 
 from .classes import CLASS_NAMES
-from .labels import write_labels
+from .labels import to_yolo_line, write_labels
 from .sample import Sample
 
 LICENSES = """# Dataset sources and licences
@@ -34,8 +34,9 @@ def compute_stats(
         with_weapon = 0
         for s in items:
             sources[s.source] += 1
-            with_weapon += bool(s.weapon_classes)
-            for b in s.boxes:
+            valid_boxes = [b for b in s.boxes if to_yolo_line(b, s.width, s.height) is not None]
+            with_weapon += any(b.cls in {1, 2, 3} for b in valid_boxes)
+            for b in valid_boxes:
                 instances[CLASS_NAMES[b.cls]] += 1
         stats["splits"][split] = {
             "images": len(items),
@@ -57,6 +58,19 @@ def write_dataset(
     if out.exists() and any(out.iterdir()):
         raise FileExistsError(f"{out} is not empty")
     out.mkdir(parents=True, exist_ok=True)
+
+    # Duplicate key guard
+    keys: set[str] = set()
+    for _split, items in splits.items():
+        for s in items:
+            if s.key in keys:
+                raise ValueError(f"duplicate sample key {s.key!r}")
+            keys.add(s.key)
+    for s in hardneg:
+        if s.key in keys:
+            raise ValueError(f"duplicate sample key {s.key!r}")
+        keys.add(s.key)
+
     with (out / "manifest.jsonl").open("w", encoding="utf-8") as manifest:
         for split, items in splits.items():
             img_dir, lbl_dir = out / "images" / split, out / "labels" / split
@@ -65,13 +79,14 @@ def write_dataset(
             for s in items:
                 name = _image_name(s)
                 shutil.copyfile(s.image_path, img_dir / name)
-                write_labels(lbl_dir / f"{s.key}.txt", s.boxes, s.width, s.height)
+                valid_boxes = [b for b in s.boxes if to_yolo_line(b, s.width, s.height) is not None]
+                write_labels(lbl_dir / f"{s.key}.txt", valid_boxes, s.width, s.height)
                 row = {
                     "file": f"images/{split}/{name}",
                     "split": split,
                     "source": s.source,
                     "group": s.group,
-                    "classes": sorted({CLASS_NAMES[b.cls] for b in s.boxes}),
+                    "classes": sorted({CLASS_NAMES[b.cls] for b in valid_boxes}),
                 }
                 manifest.write(json.dumps(row) + "\n")
 
@@ -81,7 +96,6 @@ def write_dataset(
         shutil.copyfile(s.image_path, hard_dir / _image_name(s))
 
     data = {
-        "path": ".",
         "train": "images/train",
         "val": "images/val",
         "test": "images/test",

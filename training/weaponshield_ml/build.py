@@ -12,7 +12,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from .autolabel import PersonLabeler, add_person_labels
-from .grouping import compute_hashes, dedupe_and_group
+from .grouping import compute_hashes, dedupe_and_group, near_duplicate_pairs
 from .sample import Sample
 from .split import split_groups
 from .writer import write_dataset
@@ -32,10 +32,23 @@ def build(
         raise FileExistsError(f"{out} is not empty")
     samples = [s for source in sources for s in source]
     hard = list(hardneg)
-    add_person_labels(samples, labeler)
     kept, exact = dedupe_and_group(samples, compute_hashes(samples), max_distance)
-    splits = split_groups(kept, seed=seed)
-    return write_dataset(out, splits, hard, {**(dropped or {}), "exact_duplicates": exact})
+    kept_hashes = compute_hashes(kept)
+    labelled = add_person_labels(kept, labeler)
+    size_mismatch = len(kept) - len(labelled)
+    hard_hashes = compute_hashes(hard)
+    pairs = near_duplicate_pairs(kept_hashes + hard_hashes, max_distance)
+    hardneg_to_drop = {j - len(kept) for i, j in pairs if i < len(kept) and j >= len(kept)}
+    hard = [h for i, h in enumerate(hard) if i not in hardneg_to_drop]
+    hardneg_overlaps = len(hardneg_to_drop)
+    splits = split_groups(labelled, seed=seed)
+    dropped_dict = {
+        **(dropped or {}),
+        "exact_duplicates": exact,
+        "size_mismatch": size_mismatch,
+        "hardneg_overlaps_train": hardneg_overlaps,
+    }
+    return write_dataset(out, splits, hard, dropped_dict)
 
 
 def main() -> None:

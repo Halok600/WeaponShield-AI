@@ -14,7 +14,7 @@ COCO_PERSON = 0
 
 
 class PersonLabeler(Protocol):
-    def __call__(self, paths: Sequence[Path]) -> list[list[Box]]: ...
+    def __call__(self, paths: Sequence[Path]) -> list[tuple[list[Box], tuple[int, int]]]: ...
 
 
 class YoloPersonLabeler:
@@ -28,7 +28,7 @@ class YoloPersonLabeler:
         self.device = device
         self.batch = batch
 
-    def __call__(self, paths: Sequence[Path]) -> list[list[Box]]:
+    def __call__(self, paths: Sequence[Path]) -> list[tuple[list[Box], tuple[int, int]]]:
         results = self.model.predict(
             [str(p) for p in paths],
             conf=self.conf,
@@ -36,12 +36,19 @@ class YoloPersonLabeler:
             device=self.device,
             batch=self.batch,
             verbose=False,
+            stream=True,
         )
-        return [[Box(PERSON, *map(float, xyxy)) for xyxy in r.boxes.xyxy.tolist()] for r in results]
+        return [([Box(PERSON, *map(float, xyxy)) for xyxy in r.boxes.xyxy.tolist()], r.orig_shape) for r in results]
 
 
-def add_person_labels(samples: Sequence[Sample], labeler: PersonLabeler, chunk: int = 64) -> None:
+def add_person_labels(samples: Sequence[Sample], labeler: PersonLabeler, chunk: int = 64) -> list[Sample]:
+    kept = []
     for start in range(0, len(samples), chunk):
         part = samples[start : start + chunk]
-        for s, persons in zip(part, labeler([s.image_path for s in part]), strict=True):
-            s.boxes = [b for b in s.boxes if b.cls != PERSON] + persons
+        labels = labeler([s.image_path for s in part])
+        for s, (persons, (h, w)) in zip(part, labels, strict=True):
+            if s.height == h and s.width == w:
+                s.boxes = [b for b in s.boxes if b.cls != PERSON] + persons
+                kept.append(s)
+        print(f"autolabel: {start + len(part)}/{len(samples)}", flush=True)
+    return kept
