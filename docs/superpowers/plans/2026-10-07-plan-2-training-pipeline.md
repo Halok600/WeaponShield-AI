@@ -1577,7 +1577,8 @@ git commit -m "feat(training): training CLI with CCTV-style Albumentations and t
 - Consumes: `Box`, `iou`, `read_labels`, `CLASS_NAMES`, `WEAPON_IDS` (Task 1); `write_data_yaml` (Task 5); dataset layout (Task 3)
 - Produces:
   - `PRESET_NAMES = ("low", "balanced", "high")`
-  - `choose_thresholds(px, p, r, f1, row_names, *, low_precision=0.9, high_recall=0.9) -> dict[str, dict[str, float]]` — balanced = argmax F1; low = smallest conf ≥ balanced with precision ≥ 0.9 (else min(balanced + 0.15, 0.9)); high = largest conf ≤ balanced with recall ≥ 0.9 (else max(balanced − 0.15, 0.05)); rounded to 2 dp
+  - `DEFAULT_THRESHOLDS = {"low": 0.6, "balanced": 0.45, "high": 0.3}`
+  - `choose_thresholds(px, p, r, f1, row_names, *, low_precision=0.9, high_recall=0.9) -> dict[str, dict[str, float]]` — balanced = argmax F1; low = smallest conf ≥ balanced with precision ≥ 0.9 (else min(balanced + 0.15, 0.9)); high = largest conf ≤ balanced with recall ≥ 0.9 (else max(balanced − 0.15, 0.05)); rounded to 2 dp; every class in `CLASS_NAMES` missing from `row_names` (no validation instances) gets `DEFAULT_THRESHOLDS`
   - `downsample(x, y, n=101) -> list[list[float]]`
   - `match_detections(gt: Sequence[Box], pred: Sequence[tuple[Box, float]], iou_thr=0.5) -> tuple[int, list[Box], list[tuple[Box, float]]]` (greedy by confidence, same class)
   - `weapon_summary(per_class: Mapping[str, Mapping[str, float]]) -> dict[str, float]` (mean over pistol/rifle/knife)
@@ -1593,7 +1594,14 @@ import numpy as np
 import pytest
 
 from weaponshield_ml.classes import KNIFE, PISTOL
-from weaponshield_ml.evaluation import choose_thresholds, downsample, hardneg_fp_rate, match_detections, weapon_summary
+from weaponshield_ml.evaluation import (
+    DEFAULT_THRESHOLDS,
+    choose_thresholds,
+    downsample,
+    hardneg_fp_rate,
+    match_detections,
+    weapon_summary,
+)
 from weaponshield_ml.labels import Box
 
 
@@ -1616,6 +1624,15 @@ def test_choose_thresholds_fallbacks():
     assert t["balanced"]["knife"] == pytest.approx(0.4)
     assert t["low"]["knife"] == pytest.approx(0.55)
     assert t["high"]["knife"] == pytest.approx(0.25)
+
+
+def test_classes_without_validation_instances_get_defaults():
+    px = np.linspace(0, 1, 101)
+    flat = np.full((1, 101), 0.5)
+    t = choose_thresholds(px, flat, flat, flat, ["person"])
+    for preset, value in DEFAULT_THRESHOLDS.items():
+        assert t[preset]["knife"] == value
+        assert set(t[preset]) == {"person", "pistol", "rifle", "knife"}
 
 
 def test_downsample_keeps_endpoints():
@@ -1667,6 +1684,8 @@ from .labels import Box, iou
 
 PRESET_NAMES = ("low", "balanced", "high")
 WEAPON_NAMES = tuple(CLASS_NAMES[i] for i in sorted(WEAPON_IDS))
+# Used for classes with no validation instances (matches the web app's provisional Balanced-ish values).
+DEFAULT_THRESHOLDS = {"low": 0.6, "balanced": 0.45, "high": 0.3}
 
 
 def choose_thresholds(
@@ -1691,6 +1710,10 @@ def choose_thresholds(
         out["balanced"][name] = round(balanced, 2)
         out["low"][name] = round(low, 2)
         out["high"][name] = round(high, 2)
+    for name in CLASS_NAMES:
+        if name not in row_names:
+            for preset in PRESET_NAMES:
+                out[preset][name] = DEFAULT_THRESHOLDS[preset]
     return out
 
 
