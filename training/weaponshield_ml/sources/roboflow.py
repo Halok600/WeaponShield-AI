@@ -55,7 +55,10 @@ def rf_labels_to_boxes(
             raise ValueError(
                 f"expected 5 fields (class cx cy w h), got {len(fields)}: polygon exports are not supported"
             )
-        r = resolve(names[int(fields[0])], ROBOFLOW_LABELS, strict=True)
+        i = int(fields[0])
+        if not 0 <= i < len(names):
+            raise ValueError(f"class index {i} out of range for {len(names)} names")
+        r = resolve(names[i], ROBOFLOW_LABELS, strict=True)
         if r == DROP_IMAGE:
             return DROP_IMAGE
         if r is None:
@@ -78,13 +81,24 @@ def _names_from_yaml(data_yaml: Path) -> list[str]:
     return list(names)
 
 
-def load_roboflow(cache: Path, dropped: Counter[str], api_key: str) -> Iterator[Sample]:
-    root = cache / "roboflow"
-    if not (root / "data.yaml").exists():
+def _download(root: Path, api_key: str) -> None:
+    try:
         from roboflow import Roboflow
 
         version = Roboflow(api_key=api_key).workspace(RF_WORKSPACE).project(RF_PROJECT).version(RF_VERSION)
-        version.download("yolov8", location=str(root), overwrite=False)
+        # Only reached when data.yaml is missing, so a partial directory from an interrupted run must be replaced.
+        version.download("yolov8", location=str(root), overwrite=True)
+    except Exception as e:  # noqa: BLE001 - re-raised below with the key scrubbed
+        message = str(e).replace(api_key, "***") if api_key else str(e)
+        raise RuntimeError(f"Roboflow download failed: {type(e).__name__}: {message}") from None
+    if not (root / "data.yaml").exists():
+        raise RuntimeError(f"Roboflow download did not produce data.yaml in {root}")
+
+
+def load_roboflow(cache: Path, dropped: Counter[str], api_key: str) -> Iterator[Sample]:
+    root = cache / "roboflow"
+    if not (root / "data.yaml").exists():
+        _download(root, api_key)
     names = _names_from_yaml(root / "data.yaml")
     check_names(names)
     for split in ("train", "valid", "test"):

@@ -34,7 +34,7 @@ def test_label_files(tmp_path):
 def test_sample_defaults(tmp_path):
     s = Sample(
         key="hf-1",
-        source="hf-weapons",
+        source="roboflow-weapons",
         image_path=tmp_path / "a.jpg",
         width=10,
         height=10,

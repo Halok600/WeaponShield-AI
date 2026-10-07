@@ -1,4 +1,7 @@
+import sys
+import types
 from collections import Counter
+from pathlib import Path
 
 import pytest
 import yaml
@@ -106,3 +109,63 @@ def test_load_roboflow_reads_an_existing_export_offline(tmp_path):
     long_key = next(k for k in by_key if k.startswith("rf-train-xxxx"))
     assert len(long_key) < 140 and long_key != "rf-train-" + long_stem
     assert dropped == {"roboflow_ambiguous_label": 1, "roboflow_no_weapon_boxes": 2}
+
+
+def test_rf_rejects_out_of_range_class_index():
+    with pytest.raises(ValueError, match="class index 9 out of range for 6 names"):
+        rf_labels_to_boxes(["9 0.5 0.5 0.1 0.1"], NAMES, 10, 10, Counter())
+    with pytest.raises(ValueError, match="class index -1 out of range"):
+        rf_labels_to_boxes(["-1 0.5 0.5 0.1 0.1"], NAMES, 10, 10, Counter())
+
+
+def _fake_roboflow(download):
+    class _Version:
+        def download(self, *args, **kwargs):
+            return download(*args, **kwargs)
+
+    class _Project:
+        def version(self, number):
+            return _Version()
+
+    class _Workspace:
+        def project(self, name):
+            return _Project()
+
+    class Roboflow:
+        def __init__(self, api_key):
+            self.api_key = api_key
+
+        def workspace(self, name):
+            return _Workspace()
+
+    return types.SimpleNamespace(Roboflow=Roboflow)
+
+
+def test_download_error_never_leaks_the_api_key(tmp_path, monkeypatch):
+    def boom(*args, **kwargs):
+        raise ConnectionError("GET https://api.roboflow.com/x?api_key=SECRET123 failed")
+
+    monkeypatch.setitem(sys.modules, "roboflow", _fake_roboflow(boom))
+    with pytest.raises(RuntimeError) as e:
+        list(load_roboflow(tmp_path, Counter(), api_key="SECRET123"))
+    assert "***" in str(e.value) and "SECRET123" not in str(e.value)
+    assert e.value.__cause__ is None and e.value.__suppress_context__
+
+
+def test_download_overwrites_a_partial_cache_dir(tmp_path, monkeypatch):
+    (tmp_path / "roboflow").mkdir()  # interrupted earlier run: directory exists, no data.yaml
+    seen = {}
+
+    def download(fmt, location, overwrite):
+        seen.update(fmt=fmt, overwrite=overwrite)
+        Path(location, "data.yaml").write_text(yaml.safe_dump({"names": NAMES}), encoding="utf-8")
+
+    monkeypatch.setitem(sys.modules, "roboflow", _fake_roboflow(download))
+    assert list(load_roboflow(tmp_path, Counter(), api_key="k")) == []
+    assert seen == {"fmt": "yolov8", "overwrite": True}
+
+
+def test_download_that_produces_no_data_yaml_fails_loudly(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "roboflow", _fake_roboflow(lambda *a, **k: None))
+    with pytest.raises(RuntimeError, match="did not produce data.yaml"):
+        list(load_roboflow(tmp_path, Counter(), api_key="k"))

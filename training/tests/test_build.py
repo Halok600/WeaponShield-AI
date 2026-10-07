@@ -36,7 +36,7 @@ def make_samples(tmp_path, n, source, weapon_cls):
 def dataset(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
-    weapons = make_samples(src, 40, "hf-weapons", PISTOL)
+    weapons = make_samples(src, 40, "roboflow-weapons", PISTOL)
     knives = make_samples(src, 20, "oi-weapons", KNIFE)
     negatives = make_samples(src, 20, "oi-negatives", None)
     dup = Sample(key="dup", source="oi-negatives", image_path=weapons[0].image_path, width=64, height=48)
@@ -80,7 +80,7 @@ def test_stats_and_duplicates(dataset):
         "size_mismatch": 0,
         "hardneg_overlaps_train": 0,
     }
-    assert stats["sources"] == {"hf-weapons": 40, "oi-weapons": 20, "oi-negatives": 20}
+    assert stats["sources"] == {"roboflow-weapons": 40, "oi-weapons": 20, "oi-negatives": 20}
     assert stats["hardneg_images"] == 5
     total_knives = sum(v["instances"]["knife"] for v in stats["splits"].values())
     assert total_knives == 20
@@ -105,7 +105,7 @@ def test_hardneg_leakage(tmp_path):
     """Hard negatives that duplicate training images are excluded."""
     src = tmp_path / "src"
     src.mkdir()
-    weapons = make_samples(src, 10, "hf-weapons", PISTOL)
+    weapons = make_samples(src, 10, "roboflow-weapons", PISTOL)
     # A hard negative that reuses the same image file as a training sample
     hardneg = [Sample(key="hn-dup", source="oi-neg", image_path=weapons[0].image_path, width=64, height=48)]
     out = tmp_path / "ds"
@@ -132,7 +132,7 @@ def test_duplicate_key_guard(tmp_path):
     """Duplicate keys across splits and hardneg raise ValueError."""
     src = tmp_path / "src"
     src.mkdir()
-    samples = make_samples(src, 3, "hf-weapons", PISTOL)
+    samples = make_samples(src, 3, "roboflow-weapons", PISTOL)
     # Create a hard negative with a key that might collide (though unlikely with make_samples)
     # Instead, we'll use the build.py write_dataset directly to test
     from weaponshield_ml.writer import write_dataset
@@ -148,7 +148,7 @@ def test_size_mismatch_filtering(tmp_path):
     """Samples with mismatched image sizes are excluded and counted."""
     src = tmp_path / "src"
     src.mkdir()
-    samples = make_samples(src, 5, "hf-weapons", PISTOL)
+    samples = make_samples(src, 5, "roboflow-weapons", PISTOL)
 
     # FakeLabeler that reports wrong height for one sample
     path_sizes = {s.image_path: (48, 64) for s in samples}
