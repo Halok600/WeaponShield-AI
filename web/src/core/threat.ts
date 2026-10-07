@@ -50,7 +50,9 @@ export function findOwner(weapon: Track, persons: readonly Track[], expand: numb
       c.x >= p.box.x1 - expand * w && c.x <= p.box.x2 + expand * w && c.y >= p.box.y1 - expand * h && c.y <= p.box.y2 + expand * h;
     if (!inside) continue;
     const pc = center(p.box);
-    const d = Math.hypot(pc.x - c.x, pc.y - c.y);
+    const dx = pc.x - c.x;
+    const dy = pc.y - c.y;
+    const d = dx * dx + dy * dy; // squared: avoids hypot, which is not bit-exact across languages
     if (d < bestDist) {
       bestDist = d;
       best = p.id;
@@ -67,6 +69,7 @@ export class ThreatEngine {
   private open = new Map<number, ThreatEvent>(); // weapon track id -> event
   private all: ThreatEvent[] = [];
   private nextId = 1;
+  private lastMs: number | null = null;
 
   constructor(opts: Partial<ThreatOptions> = {}) {
     this.opts = { ...DEFAULT_THREAT_OPTIONS, ...opts };
@@ -81,6 +84,7 @@ export class ThreatEngine {
     this.open.clear();
     this.all = [];
     this.nextId = 1;
+    this.lastMs = null;
   }
 
   events(): ThreatEvent[] {
@@ -95,6 +99,19 @@ export class ThreatEngine {
     const armed = new Set<number>();
     const started: ThreatEvent[] = [];
     const ended: ThreatEvent[] = [];
+
+    // Time went backwards (looping clip, timeline seek): the old events belong to a timeline that no longer
+    // exists, so end them now rather than waiting for playback to pass their endMs. A weapon track that is
+    // still confirmable re-confirms below and opens a fresh event starting at tMs.
+    if (this.lastMs !== null && tMs < this.lastMs) {
+      for (const ev of this.open.values()) {
+        ev.ended = true;
+        ended.push(copy(ev));
+      }
+      this.open.clear();
+      this.confirmed.clear();
+    }
+    this.lastMs = tMs;
 
     for (const w of weapons) {
       if (!this.confirmed.has(w.id) && isConfirmed(w.history, confirmK, confirmN)) this.confirmed.add(w.id);

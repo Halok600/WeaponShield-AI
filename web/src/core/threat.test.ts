@@ -81,4 +81,75 @@ describe('ThreatEngine', () => {
     f.started[0]!.maxConf = 0;
     expect(te.events()[0]!.maxConf).toBe(0.8);
   });
+
+  it('re-confirms a weapon after its event ended and opens a new event', () => {
+    const te = new ThreatEngine({ eventGapMs: 1000 });
+    te.update([gun(5, confirmedHistory)], 0);
+    expect(te.update([], 2000).ended).toHaveLength(1);
+    const f = te.update([gun(5, confirmedHistory)], 2100);
+    expect(f.started).toMatchObject([{ id: 2, weaponTrackId: 5, startMs: 2100 }]);
+    expect(te.events()).toHaveLength(2);
+  });
+
+  it('keeps the same event when the weapon reappears within eventGapMs', () => {
+    const te = new ThreatEngine({ eventGapMs: 2000 });
+    te.update([gun(5, confirmedHistory)], 0);
+    expect(te.update([], 1500).active).toHaveLength(1);
+    const f = te.update([gun(5, confirmedHistory)], 1900);
+    expect(f.started).toEqual([]);
+    expect(f.ended).toEqual([]);
+    expect(f.active).toMatchObject([{ id: 1, startMs: 0, endMs: 1900 }]);
+    expect(te.events()).toHaveLength(1);
+  });
+
+  describe('time going backwards (looping clip, seek)', () => {
+    it('ends open events immediately, keeping their last endMs', () => {
+      const te = new ThreatEngine();
+      te.update([gun(5, confirmedHistory)], 9000);
+      const f = te.update([], 100);
+      expect(f.ended).toMatchObject([{ id: 1, ended: true, endMs: 9000 }]);
+      expect(f.active).toEqual([]);
+      expect(te.events()[0]).toMatchObject({ ended: true, endMs: 9000 });
+    });
+
+    it('opens a NEW event for a still-present confirmed weapon, starting at the new time', () => {
+      const te = new ThreatEngine();
+      te.update([person(1), gun(5, confirmedHistory)], 9000);
+      const f = te.update([person(1), gun(5, confirmedHistory)], 100);
+      expect(f.ended).toMatchObject([{ id: 1 }]);
+      expect(f.started).toMatchObject([{ id: 2, weaponTrackId: 5, startMs: 100, endMs: 100, ended: false }]);
+      expect(f.active).toMatchObject([{ id: 2 }]);
+      expect(f.confirmedWeaponIds).toEqual([5]);
+    });
+
+    it('does not re-confirm a weapon whose history no longer satisfies K-of-N', () => {
+      const te = new ThreatEngine();
+      te.update([gun(5, confirmedHistory)], 9000);
+      const f = te.update([gun(5, [true])], 100);
+      expect(f.ended).toHaveLength(1);
+      expect(f.started).toEqual([]);
+      expect(f.confirmedWeaponIds).toEqual([]);
+    });
+
+    it('leaves forward time (including equal timestamps) unaffected', () => {
+      const te = new ThreatEngine();
+      te.update([gun(5, confirmedHistory)], 1000);
+      for (const t of [1000, 1100, 5000]) {
+        const f = te.update([gun(5, confirmedHistory)], t);
+        expect(f.ended).toEqual([]);
+        expect(f.started).toEqual([]);
+        expect(f.active).toMatchObject([{ id: 1, startMs: 1000, endMs: t }]);
+      }
+    });
+
+    it('reset() clears the remembered time', () => {
+      const te = new ThreatEngine();
+      te.update([gun(5, confirmedHistory)], 9000);
+      te.reset();
+      te.update([gun(5, confirmedHistory)], 100); // would be "backwards" if 9000 were remembered
+      const f = te.update([gun(5, confirmedHistory)], 200);
+      expect(f.ended).toEqual([]);
+      expect(f.active).toMatchObject([{ id: 1, startMs: 100, endMs: 200 }]);
+    });
+  });
 });
