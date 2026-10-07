@@ -1,1 +1,9 @@
-{ "models": [] }
+{
+  "models": [
+    {
+      "file": "yolo26n-coco.onnx",
+      "url": "https://github.com/Halok600/WeaponShield-AI/releases/download/models-v0/yolo26n-coco.onnx",
+      "sha256": "0497f1291202662097b42b1edaab457f18294712bb4aaadfd3a9b6ea75700a58"
+    }
+  ]
+}
