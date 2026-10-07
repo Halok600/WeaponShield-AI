@@ -3,9 +3,9 @@ import { ACTIVE_MODEL } from '../config/models';
 import { Pipeline } from '../core/pipeline';
 import { filterForImage, PRESETS } from '../core/presets';
 import { type Detection, isWeapon } from '../core/types';
-import { createDetectorWorker, DetectorClient } from '../engine/detector-client';
+import { BusyError, createDetectorWorker, DetectorClient } from '../engine/detector-client';
 import { startLiveLoop } from '../engine/live-loop';
-import type { Backend } from '../engine/protocol';
+import type { Backend, DetectResult } from '../engine/protocol';
 import { buildDetectionPrimitives, buildTrackPrimitives, paint } from '../render/overlay';
 
 type Status = 'loading' | 'ready' | 'error';
@@ -60,6 +60,7 @@ export function LabPage() {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!live || !client || !video || !canvas) return;
+    setError(null);
     let stopLoop: (() => void) | null = null;
     let stream: MediaStream | null = null;
     const pipeline = new Pipeline(preset);
@@ -72,6 +73,7 @@ export function LabPage() {
         stream = s;
         video.srcObject = s;
         await video.play();
+        if (cancelled) return;
         stopLoop = startLiveLoop({
           video,
           client,
@@ -91,7 +93,11 @@ export function LabPage() {
           onError: (e) => setError(e instanceof Error ? e.message : String(e)),
         });
       })
-      .catch((e: Error) => setError(e.message));
+      .catch((e: Error) => {
+        if (cancelled) return; // e.g. AbortError from play() during cleanup
+        setError(e.message);
+        setLive(false);
+      });
 
     return () => {
       cancelled = true;
@@ -106,18 +112,33 @@ export function LabPage() {
     const canvas = canvasRef.current;
     if (!client || !canvas) return;
     setLive(false);
-    const shown = await createImageBitmap(file);
-    const sent = await createImageBitmap(file);
-    canvas.width = shown.width;
-    canvas.height = shown.height;
-    const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(shown, 0, 0);
-    shown.close();
-    const r = await client.detect(sent, preset.lowConf);
-    const dets = filterForImage(r.detections, preset.imageConf);
-    paint(ctx, buildDetectionPrimitives(dets), 1, 1);
-    setCount(counts(dets));
-    setInferMs(r.inferMs);
+    setError(null);
+    let shown: ImageBitmap | null = null;
+    try {
+      shown = await createImageBitmap(file);
+      canvas.width = shown.width;
+      canvas.height = shown.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(shown, 0, 0);
+      // A live frame may still be in flight right after setLive(false): wait for it (detect closes the bitmap on rejection, so make a fresh one per attempt).
+      let r: DetectResult | null = null;
+      for (let attempt = 0; r === null; attempt++) {
+        try {
+          r = await client.detect(await createImageBitmap(file), preset.lowConf);
+        } catch (e) {
+          if (!(e instanceof BusyError) || attempt >= 20) throw e;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
+      const dets = filterForImage(r.detections, preset.imageConf);
+      paint(ctx, buildDetectionPrimitives(dets), 1, 1);
+      setCount(counts(dets));
+      setInferMs(r.inferMs);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      shown?.close();
+    }
   }
 
   return (
