@@ -1,7 +1,7 @@
 // Downloads models listed in models.json (verified by SHA-256) and copies the
-// ONNX Runtime Web wasm binaries into public/ so they are served same-origin.
+// ONNX Runtime Web wasm runtime into public/ort/<version>/ so it is served same-origin.
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,13 +29,21 @@ async function fetchModels() {
   }
 }
 
+// Only the asyncify variant is loaded by the 'onnxruntime-web/webgpu' bundle (verified by grepping the built
+// worker); the jsep/jspi/plain variants would add ~60 MB of dead weight to every deploy. The files live under
+// public/ort/<onnxruntime-web version>/ so a cache-first service worker can never serve a stale runtime
+// after an upgrade.
+const ORT_FILES = ['ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.asyncify.wasm'];
+
 async function copyOrtWasm() {
-  const src = join(web, 'node_modules', 'onnxruntime-web', 'dist');
-  const dest = join(web, 'public', 'ort');
+  const pkg = join(web, 'node_modules', 'onnxruntime-web');
+  const { version } = JSON.parse(await readFile(join(pkg, 'package.json'), 'utf8'));
+  const root = join(web, 'public', 'ort');
+  const dest = join(root, version);
+  // Drop earlier layouts (unversioned files, other versions) so they do not ship.
+  await rm(root, { recursive: true, force: true });
   await mkdir(dest, { recursive: true });
-  const files = (await readdir(src)).filter((f) => /^ort-wasm.*\.(wasm|mjs)$/.test(f));
-  if (files.length === 0) throw new Error(`No ort-wasm files found in ${src}`);
-  await Promise.all(files.map((f) => copyFile(join(src, f), join(dest, f))));
+  await Promise.all(ORT_FILES.map((f) => copyFile(join(pkg, 'dist', f), join(dest, f))));
 }
 
 await Promise.all([fetchModels(), copyOrtWasm()]);

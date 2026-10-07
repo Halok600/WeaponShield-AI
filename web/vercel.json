@@ -13,6 +13,10 @@
     {
       "source": "/models/(.*)",
       "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    },
+    {
+      "source": "/ort/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
     }
   ],
   "rewrites": [{ "source": "/((?!models/|ort/|assets/).*)", "destination": "/index.html" }]

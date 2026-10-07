@@ -7,8 +7,8 @@ import type { Backend, FromWorker, ToWorker } from './protocol';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 
-// WASM binaries are copied to /ort/ by scripts/prepare-assets.mjs and served same-origin.
-ort.env.wasm.wasmPaths = new URL('/ort/', scope.location.origin).href;
+// The WASM runtime is copied to ort/<version>/ by scripts/prepare-assets.mjs and served same-origin.
+ort.env.wasm.wasmPaths = new URL(`${import.meta.env.BASE_URL}ort/${__ORT_VERSION__}/`, scope.location.origin).href;
 ort.env.wasm.numThreads = scope.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
 
 let session: ort.InferenceSession | null = null;
