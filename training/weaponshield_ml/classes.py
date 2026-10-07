@@ -13,8 +13,8 @@ DROP_IMAGE: Final = "drop-image"
 Resolved = int | None | Literal["drop-image"]
 """int: keep the box as that class; None: discard the box; DROP_IMAGE: discard the whole image."""
 
-# Subh775/WeaponDetection: Hugging Face mirror of Roboflow Universe "weapon-detection" (yolov7test), CC BY 4.0.
-HF_LABELS: Final[dict[str, Resolved]] = {
+# Roboflow Universe 'weapon-detection' by yolov7test (CC BY 4.0), raw class names.
+ROBOFLOW_LABELS: Final[dict[str, Resolved]] = {
     "Pistol": PISTOL,
     "pistol": PISTOL,
     "pistols": PISTOL,

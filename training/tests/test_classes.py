@@ -3,7 +3,6 @@ import pytest
 from weaponshield_ml.classes import (
     CLASS_NAMES,
     DROP_IMAGE,
-    HF_LABELS,
     KNIFE,
     OI_LABELS,
     OI_NEGATIVE_CLASSES,
@@ -11,12 +10,13 @@ from weaponshield_ml.classes import (
     PERSON,
     PISTOL,
     RIFLE,
+    ROBOFLOW_LABELS,
     WEAPON_IDS,
     resolve,
 )
 
-# Exact category names published by Subh775/WeaponDetection (datasets-server /info, 2026-10-07).
-HF_NAMES = [
+# Exact raw class names of the Roboflow Universe 'weapon-detection' project (yolov7test), checked 2026-10-07.
+RF_NAMES = [
     "weapons",
     "Aggressor",
     "Blood",
@@ -55,40 +55,40 @@ def test_schema_matches_web_app():
     assert WEAPON_IDS == {PISTOL, RIFLE, KNIFE}
 
 
-def test_every_hf_label_has_an_explicit_rule():
-    assert sorted(HF_LABELS) == sorted(HF_NAMES)
+def test_every_roboflow_label_has_an_explicit_rule():
+    assert sorted(ROBOFLOW_LABELS) == sorted(RF_NAMES)
 
 
 @pytest.mark.parametrize("name", ["Pistol", "pistol", "pistols", "handgun"])
 def test_handguns_are_pistols(name):
-    assert resolve(name, HF_LABELS, strict=True) == PISTOL
+    assert resolve(name, ROBOFLOW_LABELS, strict=True) == PISTOL
 
 
 @pytest.mark.parametrize(
     "name", ["Rifle", "rifle", "Shotgun", "shotgun", "Long guns", "larga", "Heavy Gun", "heavyweapon"]
 )
 def test_long_guns_are_rifles(name):
-    assert resolve(name, HF_LABELS, strict=True) == RIFLE
+    assert resolve(name, ROBOFLOW_LABELS, strict=True) == RIFLE
 
 
 @pytest.mark.parametrize("name", ["Knife", "Knife_Deploy", "Knife_Weapon"])
 def test_knives(name):
-    assert resolve(name, HF_LABELS, strict=True) == KNIFE
+    assert resolve(name, ROBOFLOW_LABELS, strict=True) == KNIFE
 
 
 @pytest.mark.parametrize("name", ["weapons", "weapon", "Guns", "guns", "Guns perspective", "al"])
 def test_generic_weapon_labels_drop_the_image(name):
-    assert resolve(name, HF_LABELS, strict=True) == DROP_IMAGE
+    assert resolve(name, ROBOFLOW_LABELS, strict=True) == DROP_IMAGE
 
 
 @pytest.mark.parametrize("name", ["Person", "person", "Aggressor", "Victim", "Blood", "Hand", "Stabbing", "violence"])
 def test_people_and_context_boxes_are_discarded(name):
-    assert resolve(name, HF_LABELS, strict=True) is None
+    assert resolve(name, ROBOFLOW_LABELS, strict=True) is None
 
 
 def test_unknown_labels():
     with pytest.raises(KeyError, match="Revolver"):
-        resolve("Revolver", HF_LABELS, strict=True)
+        resolve("Revolver", ROBOFLOW_LABELS, strict=True)
     assert resolve("Mobile phone", OI_LABELS, strict=False) is None
 
 

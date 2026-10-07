@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -54,8 +56,8 @@ def build(
 def main() -> None:
     from .autolabel import YoloPersonLabeler
     from .classes import OI_NEGATIVE_CLASSES, OI_WEAPON_CLASSES
-    from .sources.hf_weapons import load_hf_weapons
     from .sources.open_images import load_open_images
+    from .sources.roboflow import load_roboflow
 
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--out", type=Path, required=True)
@@ -64,10 +66,13 @@ def main() -> None:
     p.add_argument("--labeler-weights", default="yolo26x.pt")
     p.add_argument("--oi-negatives", type=int, default=6000)
     p.add_argument("--hardneg", type=int, default=500)
+    p.add_argument("--no-roboflow", action="store_true", help="skip the Roboflow weapon-detection source (no API key)")
     p.add_argument("--smoke", action="store_true", help="tiny limits for a quick end-to-end check")
     args = p.parse_args()
 
-    hf_limit = 30 if args.smoke else None
+    api_key = os.environ.get("ROBOFLOW_API_KEY")
+    if not api_key and not args.no_roboflow:
+        sys.exit("set ROBOFLOW_API_KEY or pass --no-roboflow")
     oi_weapons_max = 30 if args.smoke else None
     oi_negatives = 20 if args.smoke else args.oi_negatives
     hardneg_max = 10 if args.smoke else args.hardneg
@@ -76,8 +81,8 @@ def main() -> None:
     oi_split = "validation" if args.smoke else "train"
 
     dropped: Counter[str] = Counter()
-    sources = [
-        load_hf_weapons(args.cache, dropped, limit=hf_limit),
+    sources = [] if args.no_roboflow else [load_roboflow(args.cache, dropped, api_key)]
+    sources += [
         load_open_images(
             args.cache, dropped, split=oi_split, classes=OI_WEAPON_CLASSES, max_samples=oi_weapons_max, role="weapons"
         ),
