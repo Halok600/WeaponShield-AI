@@ -31,6 +31,14 @@ def write_data_yaml(data_root: Path, dest: Path) -> Path:
     return dest
 
 
+def checkpoint_is_fresh(path: Path, started: float) -> bool:
+    """True if `path` exists and was written at or after `started` (epoch seconds)."""
+    try:
+        return path.stat().st_mtime >= started
+    except OSError:
+        return False
+
+
 def resolve_device(device: str) -> str | int | list[int]:
     if device != "auto":
         return device

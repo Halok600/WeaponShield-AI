@@ -38,3 +38,27 @@ def test_write_data_yaml_makes_path_absolute(tmp_path):
 def test_resolve_device_passthrough():
     assert resolve_device("cpu") == "cpu"
     assert resolve_device("0") == "0"
+
+
+def test_checkpoint_is_fresh(tmp_path):
+    import os
+    import time
+
+    from weaponshield_ml.training import checkpoint_is_fresh
+
+    f = tmp_path / "best.pt"
+    f.write_bytes(b"x")
+    now = time.time()
+    os.utime(f, (now, now))
+    assert checkpoint_is_fresh(f, now - 10)  # fresh
+    os.utime(f, (now - 100, now - 100))
+    assert not checkpoint_is_fresh(f, now - 10)  # stale
+    assert not checkpoint_is_fresh(tmp_path / "missing.pt", now - 10)  # missing
+
+
+def test_resolve_device_auto(monkeypatch):
+    import torch
+
+    for count, expected in [(0, "cpu"), (1, 0), (2, [0, 1])]:
+        monkeypatch.setattr(torch.cuda, "device_count", lambda c=count: c)
+        assert resolve_device("auto") == expected
