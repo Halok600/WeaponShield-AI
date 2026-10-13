@@ -30,7 +30,8 @@ def roboflow_key() -> str | None:
         from kaggle_secrets import UserSecretsClient
 
         key = UserSecretsClient().get_secret("ROBOFLOW_API_KEY")
-    except Exception:  # not on Kaggle, or the secret is not attached to this kernel
+    except Exception as exc:  # not on Kaggle, or the secret is not attached to this kernel
+        print(f"ROBOFLOW_API_KEY secret unavailable: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
         key = None
     return key or os.environ.get("ROBOFLOW_API_KEY") or None
 
