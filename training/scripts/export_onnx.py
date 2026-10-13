@@ -4,6 +4,7 @@ The web app expects a single output shaped [1, 300, 6] holding
 [x1, y1, x2, y2, conf, class_id] in letterboxed input pixels. This script
 refuses to produce anything else.
 """
+
 from __future__ import annotations
 
 import argparse

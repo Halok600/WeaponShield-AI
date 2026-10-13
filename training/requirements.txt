@@ -1,0 +1,8 @@
+-r requirements-export.txt
+ultralytics==8.4.174
+albumentations==2.0.8
+fiftyone==1.22.1
+imagehash==4.3.2
+pillow>=10
+roboflow==1.7.0
+pyyaml>=6

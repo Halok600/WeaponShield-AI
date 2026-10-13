@@ -1,0 +1,8 @@
+pytest==9.1.1
+ruff==0.16.10
+numpy>=1.26
+pillow>=10
+imagehash==4.3.2
+pyyaml>=6
+albumentations==2.0.8
+kaggle==2.2.4

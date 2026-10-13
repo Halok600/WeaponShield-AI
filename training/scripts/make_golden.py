@@ -5,6 +5,7 @@ For each reference image this saves:
   {name}.out.f32  raw [1,300,6] float32 output from Python onnxruntime
   {name}.json     source size + Ultralytics predictions (conf >= 0.25, source pixels)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -55,7 +56,9 @@ def main() -> None:
         result = model.predict(bgr, imgsz=args.size, conf=0.25, verbose=False)[0]
         dets = [
             {"classId": int(c), "conf": float(s), "box": [float(v) for v in b]}
-            for b, s, c in zip(result.boxes.xyxy.tolist(), result.boxes.conf.tolist(), result.boxes.cls.tolist())
+            for b, s, c in zip(
+                result.boxes.xyxy.tolist(), result.boxes.conf.tolist(), result.boxes.cls.tolist(), strict=True
+            )
         ]
         meta = {"srcW": w, "srcH": h, "size": args.size, "ultralytics": dets}
         (args.out / f"{name}.json").write_text(json.dumps(meta, indent=2))

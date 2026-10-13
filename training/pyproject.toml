@@ -1,0 +1,24 @@
+[project]
+name = "weaponshield-ml"
+version = "2.0.0"
+description = "Dataset, training and evaluation pipeline for WeaponShield AI"
+requires-python = ">=3.10"
+license = "AGPL-3.0-only"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["weaponshield_ml*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
