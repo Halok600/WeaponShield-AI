@@ -1,3 +1,6 @@
+import sys
+import types
+
 import numpy as np
 import yaml
 
@@ -57,8 +60,9 @@ def test_checkpoint_is_fresh(tmp_path):
 
 
 def test_resolve_device_auto(monkeypatch):
-    import torch
-
+    # stub torch so the test runs in CPU-only CI without installing it
+    cuda = types.SimpleNamespace(device_count=lambda: 0)
+    monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace(cuda=cuda))
     for count, expected in [(0, "cpu"), (1, 0), (2, [0, 1])]:
-        monkeypatch.setattr(torch.cuda, "device_count", lambda c=count: c)
+        cuda.device_count = lambda c=count: c
         assert resolve_device("auto") == expected
