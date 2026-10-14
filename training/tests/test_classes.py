@@ -47,6 +47,8 @@ RF_NAMES = [
     "violence",
     "weapon",
 ]
+# Names in the actual v16 YOLOv8 export (data.yaml), seen on the first Kaggle download 2026-10-14.
+RF_V16_NAMES = ["gun", "heavy-weapon", "knife"]
 
 
 def test_schema_matches_web_app():
@@ -56,22 +58,22 @@ def test_schema_matches_web_app():
 
 
 def test_every_roboflow_label_has_an_explicit_rule():
-    assert sorted(ROBOFLOW_LABELS) == sorted(RF_NAMES)
+    assert sorted(ROBOFLOW_LABELS) == sorted(RF_NAMES + RF_V16_NAMES)
 
 
-@pytest.mark.parametrize("name", ["Pistol", "pistol", "pistols", "handgun"])
+@pytest.mark.parametrize("name", ["Pistol", "pistol", "pistols", "handgun", "gun"])
 def test_handguns_are_pistols(name):
     assert resolve(name, ROBOFLOW_LABELS, strict=True) == PISTOL
 
 
 @pytest.mark.parametrize(
-    "name", ["Rifle", "rifle", "Shotgun", "shotgun", "Long guns", "larga", "Heavy Gun", "heavyweapon"]
+    "name", ["Rifle", "rifle", "Shotgun", "shotgun", "Long guns", "larga", "Heavy Gun", "heavyweapon", "heavy-weapon"]
 )
 def test_long_guns_are_rifles(name):
     assert resolve(name, ROBOFLOW_LABELS, strict=True) == RIFLE
 
 
-@pytest.mark.parametrize("name", ["Knife", "Knife_Deploy", "Knife_Weapon"])
+@pytest.mark.parametrize("name", ["Knife", "Knife_Deploy", "Knife_Weapon", "knife"])
 def test_knives(name):
     assert resolve(name, ROBOFLOW_LABELS, strict=True) == KNIFE
 

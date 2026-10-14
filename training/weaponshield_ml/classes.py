@@ -19,6 +19,7 @@ ROBOFLOW_LABELS: Final[dict[str, Resolved]] = {
     "pistol": PISTOL,
     "pistols": PISTOL,
     "handgun": PISTOL,
+    "gun": PISTOL,  # v16 export: its 'gun' boxes are handguns (long guns are 'heavy-weapon')
     "Rifle": RIFLE,
     "rifle": RIFLE,
     "Shotgun": RIFLE,
@@ -27,9 +28,11 @@ ROBOFLOW_LABELS: Final[dict[str, Resolved]] = {
     "larga": RIFLE,
     "Heavy Gun": RIFLE,
     "heavyweapon": RIFLE,
+    "heavy-weapon": RIFLE,
     "Knife": KNIFE,
     "Knife_Deploy": KNIFE,
     "Knife_Weapon": KNIFE,
+    "knife": KNIFE,
     # Generic labels that do not say which weapon it is: the image cannot be labelled correctly.
     "weapons": DROP_IMAGE,
     "weapon": DROP_IMAGE,
