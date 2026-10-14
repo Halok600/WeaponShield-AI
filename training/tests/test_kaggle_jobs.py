@@ -60,3 +60,26 @@ def test_ci_workflow_is_cpu_only_and_least_privilege():
     workflow = yaml.safe_load((TRAINING.parent / ".github" / "workflows" / "training.yml").read_text())
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["jobs"]["training"]["timeout-minutes"] > 0
+
+
+def test_roboflow_key_retries_secret_on_www_kaggle_when_url_base_is_rejected(monkeypatch):
+    # Kaggle batch runs set KAGGLE_URL_BASE=https://api.kaggle.com, which answers HTTP 400 to every secret request,
+    # while the same request to https://www.kaggle.com succeeds.
+    import sys
+    import types
+
+    class UserSecretsClient:
+        def __init__(self):
+            self.base = run_dataset.os.environ.get("KAGGLE_URL_BASE", "https://www.kaggle.com")
+
+        def get_secret(self, label):
+            if self.base != "https://www.kaggle.com":
+                raise ConnectionError("Connection error trying to communicate with service.")
+            return "rf-key" if label == "ROBOFLOW_API_KEY" else None
+
+    run_dataset = load("run_dataset")
+    monkeypatch.setitem(sys.modules, "kaggle_secrets", types.SimpleNamespace(UserSecretsClient=UserSecretsClient))
+    monkeypatch.delenv("ROBOFLOW_API_KEY", raising=False)
+    monkeypatch.setenv("KAGGLE_URL_BASE", "https://api.kaggle.com")
+    assert run_dataset.roboflow_key() == "rf-key"
+    assert run_dataset.os.environ["KAGGLE_URL_BASE"] == "https://api.kaggle.com"  # restored afterwards
